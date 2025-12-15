@@ -1,4 +1,7 @@
 #include "lib_tar.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 
 /**
  * Checks whether the archive is valid.
@@ -16,8 +19,50 @@
  *         -3 if the archive contains a header with an invalid checksum value
  */
 int check_archive(int tar_fd) {
+
+    int num = 0;
+    struct posix_header header;
+    int block_size = 512;
+
+    while(read(tar_fd, &header, block_size) == block_size){
+        if (header.name[0] == '\0'){
+            break;
+        }
+        num++;
+        long file_size = strtol(header.size, NULL, 8);
+
+        printf("Filename: %s\n", header.name);
+        printf("Size octal: %ld\n", file_size);
+
+        if (strcmp(header.magic, "ustar") != 0){
+            return -1;
+        }
+        if (header.version[0] != '0' && header.version[1] != '0'){
+            return -2;
+        }
+
+        unsigned int checksum = 0;
+
+        unsigned char *bytes = (unsigned char *) &header;
+        
+        for (int i = 0; i < block_size; i++){
+            if (i >= 148 && i < 156){
+                checksum += 32;
+            }
+            else{
+                checksum += bytes[i];
+            }
+        }
+
+        if (checksum != strtol(header.chksum, NULL, 8)){
+            return -3;
+        }
+        int nbr_blocks = (file_size + block_size - 1) / block_size;
+        lseek(tar_fd, nbr_blocks * block_size, SEEK_CUR);
+    }
+
     // TODO
-    return 0;
+    return num;
 }
 
 /**
