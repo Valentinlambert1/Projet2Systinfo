@@ -3,6 +3,9 @@
 #include <string.h>
 #include <stdlib.h>
 
+
+int block_size = 512;
+
 /**
  * Checks whether the archive is valid.
  *
@@ -22,8 +25,7 @@ int check_archive(int tar_fd) {
 
     int num = 0;
     struct posix_header header;
-    int block_size = 512;
-
+    
     while(read(tar_fd, &header, block_size) == block_size){
         if (header.name[0] == '\0'){
             break;
@@ -60,8 +62,6 @@ int check_archive(int tar_fd) {
         int nbr_blocks = (file_size + block_size - 1) / block_size;
         lseek(tar_fd, nbr_blocks * block_size, SEEK_CUR);
     }
-
-    // TODO
     return num;
 }
 
@@ -75,7 +75,20 @@ int check_archive(int tar_fd) {
  *         any other value otherwise.
  */
 int exists(int tar_fd, char *path) {
-    // TODO
+    struct posix_header header;
+
+    while (read(tar_fd, &header, block_size) == block_size){
+        if (header.name[0] == '\0'){
+            break;
+        }
+        if (strcmp(header.name, path) == 0){
+            return 1;
+        }
+        long file_size = strtol(header.size, NULL, 8);
+
+        int nbr_blocks = (file_size + block_size - 1) / block_size;
+        lseek(tar_fd, nbr_blocks * block_size, SEEK_CUR);
+    }
     return 0;
 }
 
@@ -90,6 +103,24 @@ int exists(int tar_fd, char *path) {
  */
 int is_dir(int tar_fd, char *path) {
     // TODO
+    struct posix_header header;
+
+    int len = strlen(path);
+    path[len] = '/';
+    path[len + 1] = '\0';
+
+    while (read(tar_fd, &header, block_size) == block_size){
+        if (header.name[0] == '\0'){
+            break;
+        }
+        if (strcmp(header.name, path) == 0 || header.typeflag == '5'){
+            return 1;
+        }
+        long file_size = strtol(header.size, NULL, 8);
+
+        int nbr_blocks = (file_size + block_size - 1) / block_size;
+        lseek(tar_fd, nbr_blocks * block_size, SEEK_CUR);
+    }
     return 0;
 }
 
@@ -103,7 +134,20 @@ int is_dir(int tar_fd, char *path) {
  *         any other value otherwise.
  */
 int is_file(int tar_fd, char *path) {
-    // TODO
+    struct posix_header header;
+    
+    while (read(tar_fd, &header, block_size) == block_size){
+        if (header.name[0] == '\0'){
+            break;
+        }
+        if (strcmp(header.name, path) == 0 && (header.typeflag == '0' || header.typeflag == '\0')){
+            return 1
+        }
+        long file_size = strtol(header.size, NULL, 8);
+
+        int nbr_blocks = (file_size + block_size - 1) / block_size;
+        lseek(tar_fd, nbr_blocks * block_size, SEEK_CUR);
+    }
     return 0;
 }
 
@@ -116,7 +160,21 @@ int is_file(int tar_fd, char *path) {
  *         any other value otherwise.
  */
 int is_symlink(int tar_fd, char *path) {
-    // TODO
+    struct posix_header header;
+    
+
+    while (read(tar_fd, &header, block_size) == block_size){
+        if (header.name[0] == '\0'){
+            break;
+        }
+        if (strcmp(header.name, path) == 0 && header.typeflag == '2'){
+            return 1
+        }
+        long file_size = strtol(header.size, NULL, 8);
+
+        int nbr_blocks = (file_size + block_size - 1) / block_size;
+        lseek(tar_fd, nbr_blocks * block_size, SEEK_CUR);
+    }
     return 0;
 }
 
