@@ -141,7 +141,7 @@ int is_file(int tar_fd, char *path) {
             break;
         }
         if (strcmp(header.name, path) == 0 && (header.typeflag == '0' || header.typeflag == '\0')){
-            return 1
+            return 1;
         }
         long file_size = strtol(header.size, NULL, 8);
 
@@ -168,7 +168,7 @@ int is_symlink(int tar_fd, char *path) {
             break;
         }
         if (strcmp(header.name, path) == 0 && header.typeflag == '2'){
-            return 1
+            return 1;
         }
         long file_size = strtol(header.size, NULL, 8);
 
