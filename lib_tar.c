@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/types.h> 
 
 
 int block_size = 512;
@@ -75,6 +76,7 @@ int check_archive(int tar_fd) {
  *         any other value otherwise.
  */
 int exists(int tar_fd, char *path) {
+    lseek(tar_fd, 0, SEEK_SET);
     struct posix_header header;
 
     while (read(tar_fd, &header, block_size) == block_size){
@@ -102,24 +104,31 @@ int exists(int tar_fd, char *path) {
  *         any other value otherwise.
  */
 int is_dir(int tar_fd, char *path) {
-    // TODO
+    //TO DO
+    lseek(tar_fd, 0, SEEK_SET); 
     struct posix_header header;
 
-    int len = strlen(path);
-    path[len] = '/';
-    path[len + 1] = '\0';
+    while (read(tar_fd, &header, 512) == 512) {
+        if (header.name[0] == '\0') break;
 
-    while (read(tar_fd, &header, block_size) == block_size){
-        if (header.name[0] == '\0'){
-            break;
-        }
-        if (strcmp(header.name, path) == 0 || header.typeflag == '5'){
+        
+        size_t h_len = strlen(header.name);
+        char h_name[101];
+        strcpy(h_name, header.name);
+        if (h_name[h_len-1] == '/') h_name[h_len-1] = '\0';
+
+        
+        char p_clean[101];
+        strcpy(p_clean, path);
+        size_t p_len = strlen(p_clean);
+        if (p_len > 0 && p_clean[p_len-1] == '/') p_clean[p_len-1] = '\0';
+
+        if (strcmp(h_name, p_clean) == 0 && header.typeflag == DIRTYPE) {
             return 1;
         }
-        long file_size = strtol(header.size, NULL, 8);
 
-        int nbr_blocks = (file_size + block_size - 1) / block_size;
-        lseek(tar_fd, nbr_blocks * block_size, SEEK_CUR);
+        long file_size = TAR_INT(header.size);
+        lseek(tar_fd, ((file_size + 511) / 512) * 512, SEEK_CUR);
     }
     return 0;
 }
@@ -134,6 +143,7 @@ int is_dir(int tar_fd, char *path) {
  *         any other value otherwise.
  */
 int is_file(int tar_fd, char *path) {
+    lseek(tar_fd, 0, SEEK_SET);
     struct posix_header header;
     
     while (read(tar_fd, &header, block_size) == block_size){
@@ -203,8 +213,67 @@ int is_symlink(int tar_fd, char *path) {
  *         -1 in case of error.
  */
 int list(int tar_fd, char *path, char **entries, size_t *no_entries) {
-    // TODO
-    return 0;
+    struct posix_header header;
+    char current_path[100];
+    size_t count = 0;
+    size_t max_out = *no_entries;
+
+    if (path == NULL || strlen(path) == 0) {
+        strcpy(current_path, "");
+    } else {
+        strncpy(current_path, path, 100);
+    }
+
+    int resolved = 0;
+    while (!resolved) {
+        resolved = 1;
+        if (lseek(tar_fd, 0, SEEK_SET) == (off_t)-1) return -1;
+        while (read(tar_fd, &header, 512) == 512) {
+            if (header.name[0] == '\0') break;
+            if (strcmp(header.name, current_path) == 0 && header.typeflag == SYMTYPE) {
+                strncpy(current_path, header.linkname, 100);
+                resolved = 0;
+                break;
+            }
+            long size = TAR_INT(header.size);
+            lseek(tar_fd, ((size + 511) / 512) * 512, SEEK_CUR);
+        }
+    }
+
+    if (lseek(tar_fd, 0, SEEK_SET) == (off_t)-1) return -1;
+    int path_exists = (strlen(current_path) == 0); 
+    size_t t_len = strlen(current_path);
+
+    while (read(tar_fd, &header, 512) == 512) {
+        if (header.name[0] == '\0') break;
+
+        if (t_len > 0 && strcmp(header.name, current_path) == 0) {
+            path_exists = 1;
+        }
+
+        if (t_len == 0 || strncmp(header.name, current_path, t_len) == 0) {
+            if (t_len == 0 || strcmp(header.name, current_path) != 0) {
+                char *rel = header.name + t_len;
+                if (rel[0] == '/') rel++;
+
+                if (rel[0] != '\0') {
+                    char *slash = strchr(rel, '/');
+                    if (slash == NULL || slash[1] == '\0') {
+                        if (count < max_out) {
+                            strncpy(entries[count], header.name, 100);
+                            count++;
+                        }
+                        path_exists = 1;
+                    }
+                }
+            }
+        }
+        long size = TAR_INT(header.size);
+        lseek(tar_fd, ((size + 511) / 512) * 512, SEEK_CUR);
+    }
+
+    *no_entries = count;
+    return path_exists ? 1 : 0;
 }
 
 /**
@@ -222,6 +291,53 @@ int list(int tar_fd, char *path, char **entries, size_t *no_entries) {
  *         -2 if an error occurred
  */
 int add_file(int tar_fd, char *filename, uint8_t *src, size_t len) {
-    // TODO
+    if (exists(tar_fd, filename)) {
+        return -1;
+    }
+
+    lseek(tar_fd, 0, SEEK_SET);
+    struct posix_header header;
+    while (read(tar_fd, &header, 512) == 512) {
+        if (header.name[0] == '\0') {
+            lseek(tar_fd, -512, SEEK_CUR);
+            break;
+        }
+        long size = strtol(header.size, NULL, 8);
+        lseek(tar_fd, ((size + 511) / 512) * 512, SEEK_CUR);
+    }
+
+    struct posix_header new_header;
+    memset(&new_header, 0, sizeof(struct posix_header));
+
+    strncpy(new_header.name, filename, 100);
+    sprintf(new_header.mode, "%07o", 0644);
+    sprintf(new_header.size, "%011lo", (unsigned long)len);
+    new_header.typeflag = REGTYPE;
+    memcpy(new_header.magic, TMAGIC, TMAGLEN);
+    memcpy(new_header.version, TVERSION, TVERSLEN);
+
+    memset(new_header.chksum, ' ', 8);
+    unsigned int sum = 0;
+    unsigned char *p = (unsigned char *)&new_header;
+    for (int i = 0; i < 512; i++) {
+        sum += p[i];
+    }
+    sprintf(new_header.chksum, "%06o", sum);
+
+    if (write(tar_fd, &new_header, 512) != 512) return -2;
+
+    if (write(tar_fd, src, len) != (ssize_t)len) return -2;
+
+    size_t padding = (512 - (len % 512)) % 512;
+    if (padding > 0) {
+        uint8_t pad[512];
+        memset(pad, 0, padding);
+        if (write(tar_fd, pad, padding) != (ssize_t)padding) return -2;
+    }
+
+    uint8_t end_blocks[1024];
+    memset(end_blocks, 0, 1024);
+    if (write(tar_fd, end_blocks, 1024) != 1024) return -2;
+
     return 0;
 }
